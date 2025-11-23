@@ -1,46 +1,28 @@
+import sys
+import os
 import asyncio
 import logging
 from aiogram import Bot, Dispatcher
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import BotCommand
-from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery
+
+# Добавляем корневую директорию в путь
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Импортируем роутер, а не отдельные классы
+from backend.chat import router as chat_router
+from backend.config import settings
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-bot = Bot(token=settings.BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-storage = MemoryStorage()
-dp = Dispatcher(storage=storage)
-
-    
-
-
-# FSM для резюме
-class ResumeStates(StatesGroup):
-    waiting_for_resume = State()
-
-# Постоянная кнопка "Отправить резюме"
-keyboard = ReplyKeyboardMarkup(
-    keyboard=[[KeyboardButton(text="Отправить резюме")]],
-    resize_keyboard=True
-)
-
-@dp.message(Command("start"))
-async def cmd_start(message: Message):
-    
-    await message.answer("Добро пожаловать")
-
-
 
 async def main():
-    await bot.set_my_commands([
-        BotCommand(command="start", description="Запуск бота")
-    ])
-
-    logger.info("Бот запущен")
+    bot = Bot(token=settings.BOT_TOKEN)
+    storage = MemoryStorage()
+    dp = Dispatcher(storage=storage)
+    
+    # Регистрируем роутер
+    dp.include_router(chat_router)
+    
+    print("Бот запущен!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
