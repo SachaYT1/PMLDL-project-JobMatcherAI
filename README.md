@@ -2,6 +2,13 @@
 
 A Telegram-first job discovery assistant that extracts structured information from unstructured job posts and recommends the most relevant vacancies to students and junior candidates. The system learns from feedback (likes/dislikes/saves) to continuously improve relevance.
 
+### What's new in this prototype
+- **Resume extraction pipeline**: hybrid regex + lightweight `SkillQualityClassifier` that derives skills/soft skills, salary expectations, work format, preferred roles, and geo data from free-form Russian résumés (`model/main.py`, `model/skill_classifier.py`).
+- **Vacancy knowledge base**: curated multi-source dataset with Telegram, hh.ru, and Habr Career examples stored in `data/jobs_sample.json` along with a repository wrapper for filtering (`model/job_repository.py`).
+- **Semantic matcher**: multilingual `sentence-transformers` encoder that builds embeddings for vacancies and re-ranks matches by cosine similarity blended with user preference boosts (`model/matcher.py`). Implementation follows the HuggingFace semantic search recipes documented in the official examples ([HuggingFace Sentence Transformers](https://github.com/huggingface/sentence-transformers)).
+- **Preference-aware Telegram bot**: `/start`, `/recommend`, `/favorites` flows built on `aiogram v3`. Users can send resumes, fetch top-10 matches, like/dislike entries, and maintain favorites. Feedback updates the preference vector so future rankings adapt to individual tastes.
+- **System design note**: `docs/architecture.md` captures the big picture, data plan, modeling approach, and monitoring strategy required by the project rubric.
+
 ### Why it matters
 - **Reduce overload**: Cuts through noisy Telegram feeds and repost channels.
 - **Personalized**: Matches by skills, preferences, salary, and work format.
@@ -35,6 +42,33 @@ A Telegram-first job discovery assistant that extracts structured information fr
 - **Ranking**: Recall@5 ≥ 0.70, NDCG@10 ≥ 0.60 (offline).
 - **Product**: D7 retention ≥ 30% (≥50 students); median latency < 1.5s at ~10k vacancies.
 - **Data quality**: ESCO coverage ≥ 90%; salary parsing accuracy ≥ 95%.
+
+### Minimal requirements checklist
+1. **Frame the problem** – target users, success metrics, and motivational context are documented in this README and detailed in `docs/architecture.md`.
+2. **Get/annotate data** – sample multi-source vacancies live in `data/jobs_sample.json`; résumé annotations that power the classifier are stored in `model/data.py`. The ingestion/annotation plan is described in the architecture note.
+3. **Explore multiple models** – hybrid rule-based + logistic classifier for information extraction plus multilingual sentence-transformer for semantic search ensure at least two modeling families are evaluated.
+4. **Fine-tune & combine** – `SkillQualityClassifier` fine-tunes logistic heads over curated Russian résюме snippets; matcher combines semantic similarity with preference-derived boosts (likes/dislikes/favorites).
+5. **Launch, monitor, maintain** – Deployable Telegram bot (`backend/main.py`) with persistent user storage, feedback loops, and monitoring hooks (structured logs). Future observability and retraining cadence are outlined in the architecture doc.
+
+### Repository layout
+| Path | Purpose |
+| --- | --- |
+| `backend/` | Aiogram bot entry point plus conversational logic, keyboards, and persistent storage. |
+| `model/main.py` | Resume parsing orchestrator returning `ResumeProfile` dataclasses. |
+| `model/skill_classifier.py` | Multi-label LogisticRegression that predicts skills & soft skills. |
+| `model/job_repository.py` | Loader and filter helpers for `data/jobs_sample.json`. |
+| `model/matcher.py` | Semantic search matcher backed by `sentence-transformers`. |
+| `data/jobs_sample.json` | Seed dataset with Telegram/hh.ru/Habr vacancies for experimentation. |
+| `docs/architecture.md` | System overview covering problem framing, data plan, modeling, and Ops. |
+
+### Running the bot locally
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+export BOT_TOKEN=...  # Telegram bot token
+python -m backend.main
+```
+The bot will request your résumé text, extract structured information, and reply with a summary. Use the reply keyboard to fetch recommendations or review favorites. Inline buttons beneath each job allow you to like, dislike, or star vacancies; these signals are stored in `data/user_state.json` (git-ignored) and immediately influence future rankings.
 
 ### Roadmap (next 2–3 weeks)
 - Improve SKILL F1 by +0.05 via domain fine-tuning and annotation expansion.
