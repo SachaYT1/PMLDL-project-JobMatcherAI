@@ -1,2 +1,4 @@
 .env
 data/user_state.json
+data/jobmatcher.db
+data/telegram.session*

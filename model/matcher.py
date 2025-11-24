@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from typing import List, Optional, Tuple
 
-from sentence_transformers import SentenceTransformer, util
+from sentence_transformers import util
 
 from .job_repository import JobRepository, Vacancy
 from .main import ResumeProfile
 from .preferences import PreferenceVector
+from .encoders import get_encoder
 
 
 class JobMatcher:
@@ -17,7 +18,7 @@ class JobMatcher:
     ):
         self.repository = repository or JobRepository()
         self.vacancies = self.repository.all()
-        self.model = SentenceTransformer(model_name)
+        self.model = get_encoder(model_name)
         self.id_to_index = {vac.id: idx for idx, vac in enumerate(self.vacancies)}
 
         corpus_texts = [self._vacancy_to_text(v) for v in self.vacancies]

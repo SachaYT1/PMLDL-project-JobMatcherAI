@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import List, Optional
 
+from data.database import JobDatabase
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-DATASET_PATH = BASE_DIR / "data" / "jobs_sample.json"
+SAMPLE_DATASET_PATH = BASE_DIR / "data" / "jobs_sample.json"
 
 
 @dataclass
@@ -20,7 +21,7 @@ class Vacancy:
     salary_min: Optional[int]
     salary_max: Optional[int]
     currency: str
-    experience: str
+    experience: Optional[str]
     skills: List[str]
     description: str
     source: str
@@ -29,11 +30,12 @@ class Vacancy:
     def to_message(self) -> str:
         salary = "Не указано"
         if self.salary_min:
-            salary = f"{self.salary_min}-{self.salary_max or self.salary_min} {self.currency}"
-        skill_line = ", ".join(self.skills[:8])
+            max_part = self.salary_max or self.salary_min
+            salary = f"{self.salary_min}-{max_part} {self.currency}"
+        skill_line = ", ".join(self.skills[:8]) or "—"
         return (
             f"<b>{self.title}</b> в {self.company}\n"
-            f"📍 {self.city} · {self.work_format}\n"
+            f"📍 {self.city or '—'} · {self.work_format or '—'}\n"
             f"💰 {salary}\n"
             f"🛠 Навыки: {skill_line}\n"
             f"{self.description}\n"
@@ -42,23 +44,30 @@ class Vacancy:
 
 
 class JobRepository:
-    def __init__(self, dataset_path: Path = DATASET_PATH):
-        self.dataset_path = dataset_path
-        self._vacancies = self._load()
-        self._index = {vac.id: vac for vac in self._vacancies}
+    def __init__(
+        self,
+        database: Optional[JobDatabase] = None,
+        seed_dataset: Path = SAMPLE_DATASET_PATH,
+    ):
+        self.database = database or JobDatabase()
+        self.seed_dataset = seed_dataset
+        self._ensure_seed()
 
-    def _load(self) -> List[Vacancy]:
-        if not self.dataset_path.exists():
-            raise FileNotFoundError(f"Dataset {self.dataset_path} not found")
-        with self.dataset_path.open(encoding="utf-8") as f:
-            data = json.load(f)
-        return [Vacancy(**item) for item in data]
+    def _ensure_seed(self) -> None:
+        if self.database.count() == 0 and self.seed_dataset.exists():
+            with self.seed_dataset.open(encoding="utf-8") as f:
+                data = json.load(f)
+            self.database.upsert(data)
 
     def all(self) -> List[Vacancy]:
-        return list(self._vacancies)
+        rows = self.database.fetch()
+        return [self._row_to_vacancy(row) for row in rows]
 
     def get(self, vacancy_id: str) -> Optional[Vacancy]:
-        return self._index.get(vacancy_id)
+        row = self.database.get(vacancy_id)
+        if not row:
+            return None
+        return self._row_to_vacancy(row)
 
     def filter(
         self,
@@ -67,16 +76,34 @@ class JobRepository:
         work_format: Optional[str] = None,
         min_salary: Optional[int] = None,
     ) -> List[Vacancy]:
-        candidates: Iterable[Vacancy] = self._vacancies
-        if city:
-            candidates = [v for v in candidates if v.city.lower() == city.lower()]
-        if work_format and work_format != "не указано":
-            candidates = [v for v in candidates if v.work_format == work_format]
-        if min_salary:
-            candidates = [
-                v
-                for v in candidates
-                if v.salary_min and v.salary_min >= min_salary * 0.6
-            ]
-        return list(candidates)
+        rows = self.database.fetch(
+            city=city,
+            work_format=work_format,
+            min_salary=min_salary,
+        )
+        return [self._row_to_vacancy(row) for row in rows]
+
+    @staticmethod
+    def _row_to_vacancy(row) -> Vacancy:
+        skills = []
+        if row["skills"]:
+            try:
+                skills = json.loads(row["skills"])
+            except json.JSONDecodeError:
+                skills = []
+        return Vacancy(
+            id=row["id"],
+            title=row["title"],
+            company=row["company"] or "Не указано",
+            city=row["city"] or "—",
+            work_format=row["work_format"] or "не указано",
+            salary_min=row["salary_min"],
+            salary_max=row["salary_max"],
+            currency=row["currency"] or "RUB",
+            experience=row["experience"],
+            skills=skills,
+            description=row["description"] or "",
+            source=row["source"],
+            url=row["url"],
+        )
 

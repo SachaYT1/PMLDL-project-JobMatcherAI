@@ -111,12 +111,17 @@ data = [
 skill_classes = [
         "ручное тестирование", "автоматизированное тестирование", "автотесты",
         "Python", "Selenium", "Postman", "тестовая документация",
-        "тест-кейсы", "баг-репорты", "API", "agile", "SQL", "Java", "Cypress",
+        "тест-кейсы", "баг-репорты", "API", "agile", "Scrum", "SQL", "Java", "Cypress",
         "Docker", "Kubernetes", "Terraform", "Linux", "Prometheus", "Grafana", "CI/CD",
         "Ansible", "Jenkins", "GitLab CI", "CircleCI", "GitHub Actions", "AWS CloudFormation", "Pulumi",
         "Bash", "PowerShell", "Go", "Puppet", "Chef", "Google Cloud", "Azure", "EC2", "S3", "RDS",
         "ELK Stack", "Fluentd", "Loki", "TCP/IP", "DNS", "HTTP/HTTPS", "VPN", "NoSQL", "DevSecOps",
-        "HashiCorp Vault", "Git", "RESTful", "SOAP", "Kong", "NGINX", "JUnit/TestNG", "JIRA", "Bugzilla"
+        "HashiCorp Vault", "Git", "RESTful", "SOAP", "GraphQL", "WebSocket",
+        "Kong", "NGINX", "JUnit/TestNG", "JIRA", "Bugzilla",
+        "Flutter", "Dart", "Android", "iOS", "Firebase", "Hive", "SQLite", "SharedPreferences",
+        "Provider", "Bloc", "Riverpod", "Clean Architecture", "MVVM",
+        "Material Design", "Cupertino", "Google Maps", "Yandex Maps",
+        "Fastlane", "GitFlow", "FastAPI", "Push notifications"
     ]
 quality_classes = [
         "аккуратность", "внимание к деталям", "стремление к качеству",
@@ -126,5 +131,6 @@ quality_classes = [
         "решительность", "усердие", "дисциплинированность", "терпеливость",
         "усидчивость", "скрупулезность", "гибкость", "стрессоустойчивость",
         "обучаемость", "аналитическое мышление", "внимательность к деталям",
-        "способность к самообучению", "клиентоориентированный подход", "критическое мышление"
+        "способность к самообучению", "клиентоориентированный подход", "критическое мышление",
+        "проактивность", "самостоятельность", "лидерство"
     ]

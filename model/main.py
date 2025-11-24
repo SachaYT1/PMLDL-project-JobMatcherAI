@@ -2,7 +2,17 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
+
+from natasha import (
+    AddrExtractor,
+    Doc,
+    MorphVocab,
+    NamesExtractor,
+    NewsEmbedding,
+    NewsNERTagger,
+    Segmenter,
+)
 
 from .skill_classifier import SkillQualityPrediction, get_classifier
 
@@ -25,21 +35,39 @@ CITY_LIST = [
     "Уфа",
 ]
 
-ROLE_KEYWORDS = [
-    "qa",
-    "тестировщик",
-    "data",
-    "devops",
-    "ml",
-    "аналитик",
-    "backend",
-    "frontend",
-    "fullstack",
-    "android",
-    "ios",
-    "product",
-    "pm",
-]
+ROLE_KEYWORDS: Dict[str, List[str]] = {
+    "flutter разработчик": ["flutter", "flutter developer"],
+    "мобильный разработчик": ["мобильный разработчик", "mobile developer", "ios/android"],
+    "android разработчик": ["android разработчик", "android developer"],
+    "ios разработчик": ["ios разработчик", "ios developer"],
+    "qa инженер": ["qa", "тестировщик", "qa engineer"],
+    "devops engineer": ["devops"],
+    "data analyst": ["data", "аналитик", "data analyst"],
+    "ml engineer": ["ml", "machine learning"],
+    "backend разработчик": ["backend"],
+    "frontend разработчик": ["frontend"],
+    "fullstack разработчик": ["fullstack"],
+    "product manager": ["product", "pm"],
+}
+
+SALARY_PATTERN = re.compile(
+    r"(?:зарплат[аы]|ожидани[ея]|компенсаци[яи]|оплата|доход|ставка|получать)\D*"
+    r"(\d[\d\s]{2,})(?:\s*[-–—]\s*(\d[\d\s]{2,}))?\s*(тыс(?:яч)?|k)?\s*(руб|₽|usd|\$|eur|€)?",
+    re.IGNORECASE,
+)
+
+WORK_FORMATS = {
+    "удаленно": ["удален", "remote", "wfh", "работать удаленно"],
+    "гибрид": ["гибрид", "hybrid"],
+    "офис": ["офис", "офлайн", "on-site", "в офисе"],
+}
+
+SEGMENTER = Segmenter()
+EMBEDDING = NewsEmbedding()
+NER_TAGGER = NewsNERTagger(EMBEDDING)
+MORPH_VOCAB = MorphVocab()
+NAMES_EXTRACTOR = NamesExtractor(MORPH_VOCAB)
+ADDR_EXTRACTOR = AddrExtractor(MORPH_VOCAB)
 
 
 @dataclass
@@ -89,13 +117,13 @@ class ResumeExtractor:
         self.classifier = get_classifier()
 
     def parse(self, text: str) -> ResumeProfile:
-
+        doc = self._build_doc(text)
         prediction: SkillQualityPrediction = self.classifier.predict(text)
         profile = ResumeProfile(raw_text=text)
 
-        profile.name = self._extract_name(text)
+        profile.name = self._extract_name(doc, text)
         profile.age = self._extract_age(text)
-        profile.city = self._extract_city(text)
+        profile.city = self._extract_city(doc, text)
         profile.education = self._extract_education(text)
         salary, currency = self._extract_salary(text)
         profile.salary_expectations = salary
@@ -110,7 +138,24 @@ class ResumeExtractor:
         return profile
 
     @staticmethod
-    def _extract_name(text: str) -> str:
+    def _build_doc(text: str) -> Doc:
+        doc = Doc(text)
+        doc.segment(SEGMENTER)
+        doc.tag_ner(NER_TAGGER)
+        return doc
+
+    @staticmethod
+    def _extract_name(doc: Doc, text: str) -> str:
+        for span in doc.spans:
+            if span.type == "PER":
+                span.normalize(MORPH_VOCAB)
+                return span.normal.title()
+        matches = list(NAMES_EXTRACTOR(text))
+        if matches:
+            fact = matches[0].fact
+            parts = [fact.first, fact.last, fact.middle]
+            name = " ".join(part for part in parts if part)
+            return name.strip()
         match = re.search(
             r"(?:Я\s[-—]\s|Меня зовут|Имя[:\s]|ФИО[:\s]|Зовут меня)\s*([А-ЯЁ][а-яё]+(?: [А-ЯЁ][а-яё]+){1,2})",
             text,
@@ -120,18 +165,24 @@ class ResumeExtractor:
 
     @staticmethod
     def _extract_age(text: str) -> Optional[int]:
-        match = re.search(r"(\d{2})\s*(?:лет|года|год)", text)
-        return int(match.group(1)) if match else None
+        match = re.search(r"(\d{1,2})\s*(?:лет|года|год)", text)
+        if match:
+            age = int(match.group(1))
+            if 14 <= age <= 70:
+                return age
+        return None
 
     @staticmethod
-    def _extract_city(text: str) -> Optional[str]:
-        match = re.search(
-            r"(?:город|г\.|живу в|проживаю в|находжусь в|based in)\s*([А-ЯЁA-Za-z\- ]+)",
-            text,
-            re.IGNORECASE,
-        )
-        if match:
-            return match.group(1).strip().title()
+    def _extract_city(doc: Doc, text: str) -> Optional[str]:
+        for span in doc.spans:
+            if span.type == "LOC":
+                span.normalize(MORPH_VOCAB)
+                return span.normal.title()
+        matches = list(ADDR_EXTRACTOR(text))
+        for match in matches:
+            city = match.fact.city or match.fact.settlement or match.fact.country
+            if city:
+                return city.title()
         for city in CITY_LIST:
             if city.lower() in text.lower():
                 return city
@@ -139,40 +190,43 @@ class ResumeExtractor:
 
     @staticmethod
     def _extract_education(text: str) -> Optional[str]:
-        match = re.search(
-            r"(?:Образование|Факультет|Высшее образование|Институт|Университет)[:\s]+([А-ЯЁA-Za-z0-9 ,.\-]+)",
-            text,
-        )
-        return match.group(1).strip() if match else None
+        education_patterns = [
+            r"(?:закончил[аи]?|окончил[аи]?|учился в|по образованию)\s+([^.\n]+)",
+            r"(?:факультет|специальность)[:\s]+([^.\n]+)",
+        ]
+        for pattern in education_patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                return match.group(1).strip().rstrip(".")
+        return None
 
     @staticmethod
     def _extract_salary(text: str) -> tuple[Optional[int], str]:
-        match = re.search(
-            r"(?:зарплат[аы]|ожидани[ея]|компенсаци[яи]|оплата)\D*(\d[\d\s]{3,})(?:\s*(k|тыс\.|тысяч))?\s*(руб|₽|usd|\$|eur|€)?",
-            text,
-            re.IGNORECASE,
-        )
+        match = SALARY_PATTERN.search(text)
         if not match:
             return None, "RUB"
-        raw_value = match.group(1).replace(" ", "")
-        multiplier = 1000 if match.group(2) else 1
-        currency_group = match.group(3) or "RUB"
+        raw_min = int(match.group(1).replace(" ", ""))
+        raw_max = match.group(2)
+        max_value = int(raw_max.replace(" ", "")) if raw_max else None
+        multiplier = 1000 if match.group(3) else 1
+        currency_group = match.group(4) or "RUB"
         mapping = {"usd": "USD", "$": "USD", "eur": "EUR", "€": "EUR", "руб": "RUB", "₽": "RUB"}
-        currency = mapping.get(currency_group.lower() if currency_group else "RUB", "RUB")
-        try:
-            return int(raw_value) * multiplier, currency
-        except ValueError:
-            return None, currency
+        currency = mapping.get(currency_group.lower(), "RUB")
+
+        min_salary = raw_min * multiplier
+        max_salary = max_value * multiplier if max_value else None
+        if max_salary:
+            salary = int((min_salary + max_salary) / 2)
+        else:
+            salary = min_salary
+        return salary, currency
 
     @staticmethod
     def _detect_work_format(text: str) -> str:
         lowered = text.lower()
-        if any(word in lowered for word in ["удал", "remote", "wfh"]):
-            return "удаленно"
-        if any(word in lowered for word in ["гибрид", "hybrid"]):
-            return "гибрид"
-        if any(word in lowered for word in ["офис", "on-site", "офлайн"]):
-            return "офис"
+        for format_name, synonyms in WORK_FORMATS.items():
+            if any(word in lowered for word in synonyms):
+                return format_name
         return "не указано"
 
     @staticmethod
@@ -184,9 +238,9 @@ class ResumeExtractor:
     def _detect_roles(text: str) -> List[str]:
         lowered = text.lower()
         roles = []
-        for role in ROLE_KEYWORDS:
-            if role in lowered:
-                roles.append(role)
+        for canonical, keywords in ROLE_KEYWORDS.items():
+            if any(keyword in lowered for keyword in keywords):
+                roles.append(canonical)
         return roles[:5]
 
     @staticmethod

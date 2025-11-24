@@ -1,17 +1,14 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import List
 
-import numpy as np
-import pandas as pd
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.linear_model import LogisticRegression
-from sklearn.multioutput import MultiOutputClassifier
-from sklearn.pipeline import Pipeline
+from sentence_transformers import util
 
-from .data import data, quality_classes, skill_classes
+from .data import quality_classes, skill_classes
+from .encoders import get_encoder
 
 
 @dataclass
@@ -21,78 +18,66 @@ class SkillQualityPrediction:
 
 
 class SkillQualityClassifier:
-    """Small multi-label classifier trained on curated Russian résumés."""
+    """Embedding-based matcher that maps résumé text to curated skill dictionaries."""
 
-    def __init__(self):
-        df = pd.DataFrame(data)
+    def __init__(self, model_name: str = "paraphrase-multilingual-MiniLM-L12-v2"):
         self.skill_classes = skill_classes
         self.quality_classes = quality_classes
-
-        # Build dense label matrix
-        skill_labels = pd.DataFrame(0, index=df.index, columns=self.skill_classes)
-        for i, skills in enumerate(df["skills"]):
-            for skill in skills:
-                if skill in skill_labels.columns:
-                    skill_labels.at[i, skill] = 1
-
-        quality_labels = pd.DataFrame(0, index=df.index, columns=self.quality_classes)
-        for i, qualities in enumerate(df["qualities"]):
-            for quality in qualities:
-                if quality in quality_labels.columns:
-                    quality_labels.at[i, quality] = 1
-
-        self.label_df = pd.concat([skill_labels, quality_labels], axis=1)
-        active_mask = (self.label_df.sum(axis=0) > 0)
-        self.active_indices = np.where(active_mask)[0]
-        self.label_active = self.label_df.loc[:, active_mask]
-
-        self.pipeline = Pipeline(
-            steps=[
-                ("vect", CountVectorizer(ngram_range=(1, 2), min_df=1, lowercase=True)),
-                (
-                    "clf",
-                    MultiOutputClassifier(
-                        LogisticRegression(
-                            max_iter=2000,
-                            class_weight="balanced",
-                            solver="lbfgs",
-                        )
-                    ),
-                ),
-            ]
+        self.encoder = get_encoder(model_name)
+        self.skill_embeddings = self.encoder.encode(
+            self.skill_classes, convert_to_tensor=True, show_progress_bar=False
         )
-        self.pipeline.fit(df["text"], self.label_active)
+        self.quality_embeddings = self.encoder.encode(
+            self.quality_classes, convert_to_tensor=True, show_progress_bar=False
+        )
 
-    def predict(self, text: str, min_prob: float = 0.35) -> SkillQualityPrediction:
-        """Return predicted skills and soft qualities."""
-        probabilities = self.pipeline.predict_proba([text])
-        # MultiOutputClassifier returns list of arrays
-        probs = np.array([p[:, 1] for p in probabilities]).flatten()
+    def predict(
+        self,
+        text: str,
+        skill_threshold: float = 0.42,
+        quality_threshold: float = 0.40,
+    ) -> SkillQualityPrediction:
+        chunks = self._chunk_text(text)
+        if not chunks:
+            return SkillQualityPrediction(skills=[], qualities=[])
 
-        full_probs = np.zeros(len(self.label_df.columns))
-        full_probs[self.active_indices] = probs
+        chunk_embeddings = self.encoder.encode(
+            chunks, convert_to_tensor=True, show_progress_bar=False
+        )
 
-        num_skills = len(self.skill_classes)
-        skill_probs = full_probs[:num_skills]
-        quality_probs = full_probs[num_skills:]
+        skill_hits = util.semantic_search(
+            self.skill_embeddings, chunk_embeddings, top_k=1
+        )
+        quality_hits = util.semantic_search(
+            self.quality_embeddings, chunk_embeddings, top_k=1
+        )
 
         predicted_skills = [
-            self.skill_classes[i]
-            for i, prob in enumerate(skill_probs)
-            if prob >= min_prob
+            self.skill_classes[idx]
+            for idx, matches in enumerate(skill_hits)
+            if matches and matches[0]["score"] >= skill_threshold
         ]
         predicted_qualities = [
-            self.quality_classes[i]
-            for i, prob in enumerate(quality_probs)
-            if prob >= min_prob
+            self.quality_classes[idx]
+            for idx, matches in enumerate(quality_hits)
+            if matches and matches[0]["score"] >= quality_threshold
         ]
 
-        return SkillQualityPrediction(
-            skills=predicted_skills[:10], qualities=predicted_qualities[:10]
-        )
+        # Deduplicate while preserving order
+        skills_unique = list(dict.fromkeys(predicted_skills))[:25]
+        qualities_unique = list(dict.fromkeys(predicted_qualities))[:15]
+
+        return SkillQualityPrediction(skills=skills_unique, qualities=qualities_unique)
+
+    @staticmethod
+    def _chunk_text(text: str) -> List[str]:
+        # Split by sentences/paragraphs and filter very short fragments
+        rough_chunks = re.split(r"[.\n\r]+", text)
+        chunks = [chunk.strip() for chunk in rough_chunks if len(chunk.strip()) > 3]
+        return chunks[:80]
 
 
-@lru_cache
+@lru_cache(maxsize=1)
 def get_classifier() -> SkillQualityClassifier:
     return SkillQualityClassifier()
 
