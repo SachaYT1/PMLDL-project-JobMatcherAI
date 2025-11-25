@@ -8,7 +8,7 @@ from aiogram.types import (
 
 main_menu = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="Отправить резюме")],
+    [KeyboardButton(text="Отправить резюме")],
         [KeyboardButton(text="Получить рекомендации")],
         [KeyboardButton(text="Избранное")],
     ],

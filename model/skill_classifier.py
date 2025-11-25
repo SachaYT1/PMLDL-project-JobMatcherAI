@@ -7,7 +7,12 @@ from typing import List
 
 from sentence_transformers import util
 
-from .data import quality_classes, skill_classes
+from .data import (
+    quality_aliases,
+    quality_classes,
+    skill_aliases,
+    skill_classes,
+)
 from .encoders import get_encoder
 
 
@@ -34,13 +39,14 @@ class SkillQualityClassifier:
     def predict(
         self,
         text: str,
-        skill_threshold: float = 0.42,
-        quality_threshold: float = 0.40,
+        skill_threshold: float = 0.38,
+        quality_threshold: float = 0.35,
     ) -> SkillQualityPrediction:
         chunks = self._chunk_text(text)
         if not chunks:
             return SkillQualityPrediction(skills=[], qualities=[])
 
+        text_lower = text.lower()
         chunk_embeddings = self.encoder.encode(
             chunks, convert_to_tensor=True, show_progress_bar=False
         )
@@ -63,6 +69,16 @@ class SkillQualityClassifier:
             if matches and matches[0]["score"] >= quality_threshold
         ]
 
+        keyword_skills = self._keyword_scan(
+            text_lower, self.skill_classes, skill_aliases
+        )
+        keyword_qualities = self._keyword_scan(
+            text_lower, self.quality_classes, quality_aliases
+        )
+
+        predicted_skills.extend(keyword_skills)
+        predicted_qualities.extend(keyword_qualities)
+
         # Deduplicate while preserving order
         skills_unique = list(dict.fromkeys(predicted_skills))[:25]
         qualities_unique = list(dict.fromkeys(predicted_qualities))[:15]
@@ -75,6 +91,24 @@ class SkillQualityClassifier:
         rough_chunks = re.split(r"[.\n\r]+", text)
         chunks = [chunk.strip() for chunk in rough_chunks if len(chunk.strip()) > 3]
         return chunks[:80]
+
+    @staticmethod
+    def _keyword_scan(
+        text_lower: str,
+        classes: List[str],
+        aliases: dict,
+    ) -> List[str]:
+        hits = []
+        for canonical in classes:
+            patterns = aliases.get(canonical, [canonical])
+            for pattern in patterns:
+                normalized = pattern.lower().strip()
+                if not normalized:
+                    continue
+                if re.search(rf"\b{re.escape(normalized)}\b", text_lower):
+                    hits.append(canonical)
+                    break
+        return hits
 
 
 @lru_cache(maxsize=1)

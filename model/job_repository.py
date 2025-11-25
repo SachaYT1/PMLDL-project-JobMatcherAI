@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,6 +9,7 @@ from typing import List, Optional
 from data.database import JobDatabase
 
 BASE_DIR = Path(__file__).resolve().parents[1]
+CSV_DATASET_PATH = BASE_DIR / "data" / "vacancies_full.csv"
 SAMPLE_DATASET_PATH = BASE_DIR / "data" / "jobs_sample.json"
 
 
@@ -54,7 +56,16 @@ class JobRepository:
         self._ensure_seed()
 
     def _ensure_seed(self) -> None:
-        if self.database.count() == 0 and self.seed_dataset.exists():
+        if self.database.count() > 0:
+            return
+
+        if CSV_DATASET_PATH.exists():
+            rows = self._load_csv_seed(CSV_DATASET_PATH)
+            if rows:
+                self.database.upsert(rows)
+                return
+
+        if self.seed_dataset.exists():
             with self.seed_dataset.open(encoding="utf-8") as f:
                 data = json.load(f)
             self.database.upsert(data)
@@ -106,4 +117,65 @@ class JobRepository:
             source=row["source"],
             url=row["url"],
         )
+
+    @staticmethod
+    def _load_csv_seed(csv_path: Path) -> List[dict]:
+        rows: List[dict] = []
+        with csv_path.open(encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for raw in reader:
+                description = "\n".join(
+                    part
+                    for part in [
+                        raw.get("snippet_requirement") or raw.get("requirements"),
+                        raw.get("snippet_responsibility") or raw.get("responsibility"),
+                    ]
+                    if part
+                )
+                rows.append(
+                    {
+                        "id": f"hhcsv_{raw['id']}",
+                        "source": "hh.ru",
+                        "title": raw.get("name") or raw.get("title"),
+                        "company": raw.get("employer_name") or raw.get("company"),
+                        "city": raw.get("area_name") or raw.get("city"),
+                        "work_format": JobRepository._normalize_work_format(
+                            raw.get("work_format") or raw.get("schedule_name") or ""
+                        ),
+                        "salary_min": JobRepository._parse_int(
+                            raw.get("salary_from")
+                        ),
+                        "salary_max": JobRepository._parse_int(
+                            raw.get("salary_to")
+                        ),
+                        "currency": raw.get("salary_currency") or "RUR",
+                        "experience": raw.get("experience_name"),
+                        "skills": [],
+                        "description": description,
+                        "url": raw.get("url") or "https://hh.ru",
+                        "raw_payload": raw,
+                    }
+                )
+        return rows
+
+    @staticmethod
+    def _parse_int(value: Optional[str]) -> Optional[int]:
+        if not value:
+            return None
+        value = value.replace(" ", "")
+        try:
+            return int(value)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _normalize_work_format(value: str) -> str:
+        lowered = value.lower()
+        if "удал" in lowered or "remote" in lowered:
+            return "удаленно"
+        if "гибрид" in lowered:
+            return "гибрид"
+        if "офис" in lowered or "месте" in lowered:
+            return "офис"
+        return "не указано"
 
