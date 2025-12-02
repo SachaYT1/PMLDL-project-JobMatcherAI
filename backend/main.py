@@ -1,17 +1,14 @@
 import asyncio
 import logging
 
-from aiogram import Bot, Dispatcher, types
-from .config import settings
+from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import BotCommand, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import BotCommand
+
 from .chat import register_handlers as chat
-from .chat import Form
-from aiogram.fsm.context import FSMContext
+from .config import settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,15 +18,6 @@ storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
 
-
-
-
-@dp.message(Command("start"))
-async def cmd_start(message: Message, state: FSMContext):
-    await state.set_state(Form.waiting_for_message)
-    await message.answer("Отправьте ваше резюме")
-
-
 def register_handlers(dp: Dispatcher):
     chat(dp)
 
@@ -37,9 +25,13 @@ def register_handlers(dp: Dispatcher):
 async def main():
 
 
-    await bot.set_my_commands([
-        BotCommand(command="start", description="Запуск бота")
-    ])
+    await bot.set_my_commands(
+        [
+            BotCommand(command="start", description="Запуск бота"),
+            BotCommand(command="recommend", description="Получить топ-10 вакансий"),
+            BotCommand(command="favorites", description="Показать избранные вакансии"),
+        ]
+    )
 
     register_handlers(dp)
 
